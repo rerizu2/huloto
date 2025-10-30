@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>写真ダウンロード（データ形式）</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 50px;
+      background-color: #f0f0f0;
+    }
+    img {
+      max-width: 80%;
+      height: auto;
+      border-radius: 10px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    img:hover {
+      transform: scale(1.05);
+    }
+    button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      background-color: #007bff;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <h1>写真をダウンロード</h1>
+  <img id="photo" src="https://underground-pink-o5vzw4ot7v.edgeone.app/IMG_20251010_200956.png" alt="ダウンロード用写真">//src="https://rerizu2.github.io/huloto/（ここに数字を入れる）.jpg"
+  <br>
+  <button id="downloadBtn">写真をダウンロード</button>
+
+  <script>
+    const downloadBtn = document.getElementById('downloadBtn');
+    const photo = document.getElementById('photo');
+
+    downloadBtn.addEventListener('click', async () => {
+      try {
+        // 画像データを取得
+        const response = await fetch(photo.src);
+        const blob = await response.blob();
+
+        // Blobからダウンロードリンクを作成
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'photo.jpg'; // 保存時のファイル名
+        document.body.appendChild(link);
+        link.click();
+
+        // 後片付け
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        alert('ダウンロードに失敗しました: ' + error);
+      }
+    });
+  </script>
+</body>
+</html>
