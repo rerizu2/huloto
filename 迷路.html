@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Neon Maze Walker - Fixed Horizon</title>
+  <style>
+    body { margin: 0; overflow: hidden; background-color: #000; }
+    canvas { display: block; }
+
+    /* タイトル画面のスタイル */
+    #title-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle, #1a1a2e 0%, #000 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      color: white;
+      font-family: 'Arial Black', sans-serif;
+    }
+
+    #title-screen h1 {
+      font-size: 60px;
+      color: #00f2ff;
+      text-shadow: 0 0 20px #00f2ff, 0 0 40px #0066ff;
+      margin-bottom: 10px;
+      animation: titleFloat 3s ease-in-out infinite;
+    }
+
+    @keyframes titleFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    #title-screen p {
+      font-size: 18px;
+      color: #aaa;
+      margin-bottom: 30px;
+    }
+
+    /* 共通ボタン設定 */
+    .btn-container { display: flex; gap: 20px; margin-top: 15px; }
+    
+    .btn {
+      background: transparent;
+      color: white;
+      border: 2px solid #00f2ff;
+      padding: 12px 30px;
+      font-size: 18px;
+      cursor: pointer;
+      font-family: 'Arial Black', sans-serif;
+      transition: 0.3s;
+      box-shadow: 0 0 10px rgba(0, 242, 255, 0.3);
+      border-radius: 5px;
+    }
+
+    .btn:hover {
+      background: #00f2ff;
+      color: #000;
+      box-shadow: 0 0 30px #00f2ff;
+    }
+
+    .btn.danger {
+      border-color: #ff0000;
+      color: #ff0000;
+      box-shadow: 0 0 10px rgba(255, 0, 0, 0.3);
+    }
+
+    .btn.danger:hover {
+      background: #ff0000;
+      color: white;
+      box-shadow: 0 0 30px #ff0000;
+    }
+
+    /* 各種画面のスタイル */
+    #instructions, #game-over {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-family: 'Arial Black', sans-serif;
+      background: rgba(0, 0, 0, 0.85);
+      padding: 40px;
+      border-radius: 15px;
+      text-align: center;
+      z-index: 20;
+      display: none;
+    }
+
+    #instructions { border: 2px solid #fff; }
+    #game-over { color: #ff0000; border: 5px solid #ff0000; }
+    
+    #minimap {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      border: 2px solid white;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 10;
+      display: none;
+    }
+
+    #score {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      color: yellow;
+      font-size: 32px;
+      font-family: 'Arial Black', sans-serif;
+      text-shadow: 2px 2px 4px #000;
+      z-index: 10;
+      display: none;
+    }
+
+    #gamepad-status {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      color: #0f0;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 200;
+    }
+  </style>
+</head>
+<body>
+
+<div id="gamepad-status">Gamepad: Not Connected</div>
+
+<!-- タイトル画面 -->
+<div id="title-screen">
+  <h1>NEON MAZE WALKER</h1>
+  <p>敵の追跡を逃れ、すべてのコインを回収せよ</p>
+  <button class="btn" onclick="startFromTitle()">GAME START</button>
+  <p style="font-size: 14px; margin-top:10px;">(コントローラー対応: Aボタンで開始)</p>
+</div>
+
+<!-- 操作説明画面 -->
+<div id="instructions" onclick="handleStartClick()">
+  <h2>MISSION</h2>
+  <p>赤い敵に捕まらずにコインを集めてください。</p>
+  <p style="color: #00f2ff;">[ クリック または Aボタン で開始 ]</p>
+  <small>(Lスティック: 移動 / Rスティック左右: 旋回)</small>
+</div>
+
+<!-- ゲームオーバー画面 -->
+<div id="game-over">
+  <h1>GAME OVER</h1>
+  <p>敵に捕まりました！</p>
+  <div class="btn-container">
+    <button class="btn danger" onclick="restartGame()">RETRY (A)</button>
+    <button class="btn" style="border-color: #fff; color: #fff;" onclick="backToTitle()">TITLE (B)</button>
+  </div>
+</div>
+
+<div id="score">Score: 0</div>
+<canvas id="minimap" width="200" height="200"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/110/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.110/examples/js/controls/PointerLockControls.js"></script>
+<script>
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050510);
+
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+  scene.add(ambientLight);
+  const pointLight = new THREE.PointLight(0x00f2ff, 1.0, 50);
+  camera.add(pointLight);
+  scene.add(camera);
+
+  const MAP_SIZE = 50;
+  const HALF_MAP = MAP_SIZE / 2;
+
+  let isGameOver = false;
+  let gameStarted = false;
+  let score = 0;
+  const walls = [];
+  const coins = [];
+  const enemies = [];
+
+  const scoreElement = document.getElementById('score');
+  const instructions = document.getElementById('instructions');
+  const gameOverScreen = document.getElementById('game-over');
+  const titleScreen = document.getElementById('title-screen');
+  const minimapCanvas = document.getElementById('minimap');
+  const gamepadStatus = document.getElementById('gamepad-status');
+
+  function createWall(x, z) {
+    const wallGeometry = new THREE.BoxGeometry(1, 3, 1);
+    const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x2222ff, emissive: 0x000033 });
+    const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+    wall.position.set(x, 1.5, z);
+    scene.add(wall);
+    walls.push(wall);
+  }
+
+  function createCoin(x, z) {
+    const coinGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.05, 16);
+    const coinMaterial = new THREE.MeshPhongMaterial({ color: 0xffd700, emissive: 0x332200 });
+    const coin = new THREE.Mesh(coinGeometry, coinMaterial);
+    coin.position.set(x, 0.8, z);
+    coin.rotation.x = Math.PI / 2;
+    scene.add(coin);
+    coins.push(coin);
+  }
+
+  function createEnemy() {
+    const enemyGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+    const enemyMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000, emissive: 0x660000 });
+    const enemy = new THREE.Mesh(enemyGeometry, enemyMaterial);
+    
+    let rx, rz;
+    do {
+      rx = (Math.random() - 0.5) * (MAP_SIZE - 2);
+      rz = (Math.random() - 0.5) * (MAP_SIZE - 2);
+    } while (new THREE.Vector2(rx, rz).distanceTo(new THREE.Vector2(0, 0)) < 10);
+    
+    enemy.position.set(rx, 0.5, rz);
+    scene.add(enemy);
+    enemies.push(enemy);
+  }
+
+  function initMap() {
+    walls.forEach(w => scene.remove(w));
+    coins.forEach(c => scene.remove(c));
+    enemies.forEach(e => scene.remove(e));
+    walls.length = 0; coins.length = 0; enemies.length = 0;
+
+    if (!scene.getObjectByName("ground")) {
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE),
+        new THREE.MeshPhongMaterial({ color: 0x111111 })
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.name = "ground";
+      scene.add(ground);
+    }
+
+    for (let z = 0; z < MAP_SIZE; z++) {
+      for (let x = 0; x < MAP_SIZE; x++) {
+        const posX = x - HALF_MAP;
+        const posZ = z - HALF_MAP;
+        if (z === 0 || z === MAP_SIZE - 1 || x === 0 || x === MAP_SIZE - 1) {
+          createWall(posX, posZ);
+        } else if (Math.random() < 0.1) {
+          createWall(posX, posZ);
+        } else if (Math.random() < 0.02) {
+          createCoin(posX, posZ);
+        }
+      }
+    }
+  }
+
+  initMap();
+
+  const controls = new THREE.PointerLockControls(camera, document.body);
+
+  window.startFromTitle = function() {
+    titleScreen.style.display = "none";
+    instructions.style.display = "block";
+    scoreElement.style.display = "block";
+    minimapCanvas.style.display = "block";
+    camera.position.set(0, 1.5, 0);
+    camera.rotation.set(0, 0, 0);
+  };
+
+  window.backToTitle = function() {
+    isGameOver = false;
+    gameStarted = false;
+    score = 0;
+    scoreElement.innerText = "Score: 0";
+    gameOverScreen.style.display = "none";
+    instructions.style.display = "none";
+    scoreElement.style.display = "none";
+    minimapCanvas.style.display = "none";
+    titleScreen.style.display = "flex";
+    controls.unlock();
+    initMap();
+  };
+
+  function handleStartClick() {
+    if (!isGameOver) {
+      controls.lock();
+      if (!gameStarted) {
+        for (let i = 0; i < 8; i++) createEnemy();
+        gameStarted = true;
+      }
+    }
+  }
+
+  controls.addEventListener('lock', () => instructions.style.display = "none");
+  controls.addEventListener('unlock', () => {
+    if (!isGameOver && titleScreen.style.display === "none") instructions.style.display = "block";
+  });
+
+  window.restartGame = function() {
+    isGameOver = false;
+    gameStarted = false;
+    score = 0;
+    scoreElement.innerText = "Score: 0";
+    gameOverScreen.style.display = "none";
+    instructions.style.display = "block";
+    camera.position.set(0, 1.5, 0);
+    camera.rotation.set(0, 0, 0);
+    initMap();
+  };
+
+  const keys = { forward: false, backward: false, left: false, right: false };
+  document.addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    if (k === "w") keys.forward = true;
+    if (k === "s") keys.backward = true;
+    if (k === "a") keys.left = true;
+    if (k === "d") keys.right = true;
+  });
+  document.addEventListener("keyup", (e) => {
+    const k = e.key.toLowerCase();
+    if (k === "w") keys.forward = false;
+    if (k === "s") keys.backward = false;
+    if (k === "a") keys.left = false;
+    if (k === "d") keys.right = false;
+  });
+
+  // --- ゲームパッド関連 ---
+  let gamepadIndex = null;
+
+  window.addEventListener("gamepadconnected", (e) => {
+    gamepadIndex = e.gamepad.index;
+    gamepadStatus.innerText = "Gamepad: " + e.gamepad.id;
+    gamepadStatus.style.color = "#0f0";
+  });
+
+  window.addEventListener("gamepaddisconnected", (e) => {
+    gamepadIndex = null;
+    gamepadStatus.innerText = "Gamepad: Not Connected";
+    gamepadStatus.style.color = "#f00";
+  });
+
+  function processGamepadInput() {
+    if (gamepadIndex === null) return;
+    const gp = navigator.getGamepads()[gamepadIndex];
+    if (!gp) return;
+
+    const threshold = 0.15;
+    const lx = Math.abs(gp.axes[0]) > threshold ? gp.axes[0] : 0;
+    const ly = Math.abs(gp.axes[1]) > threshold ? gp.axes[1] : 0;
+    const rx = Math.abs(gp.axes[2]) > threshold ? gp.axes[2] : 0;
+    // ry (上下視点) は無視するようにしました
+
+    const btnA = gp.buttons[0].pressed; 
+    const btnB = gp.buttons[1].pressed; 
+
+    if (titleScreen.style.display !== "none") {
+      if (btnA) startFromTitle();
+    } else if (isGameOver) {
+      if (btnA) restartGame();
+      if (btnB) backToTitle();
+    } else if (instructions.style.display !== "none") {
+      if (btnA) handleStartClick();
+    }
+
+    if ((controls.isLocked || gameStarted) && !isGameOver) {
+      const speed = 0.12;
+      const prevPos = camera.position.clone();
+
+      controls.moveForward(-ly * speed);
+      controls.moveRight(lx * speed);
+
+      for (let wall of walls) {
+        if (Math.abs(camera.position.x - wall.position.x) < 0.7 &&
+            Math.abs(camera.position.z - wall.position.z) < 0.7) {
+          camera.position.copy(prevPos);
+          break;
+        }
+      }
+
+      // 視点移動 (左右回転のみ)
+      const rotationSpeed = 0.04;
+      camera.rotation.y -= rx * rotationSpeed;
+      
+      // 【修正】上下の回転(x)と傾き(z)を強制的に0（水平）に固定
+      camera.rotation.x = 0;
+      camera.rotation.z = 0;
+    }
+  }
+
+  function updatePlayer() {
+    if (!controls.isLocked || isGameOver) return;
+    const speed = 0.12;
+    const prevPos = camera.position.clone();
+
+    if (keys.forward) controls.moveForward(speed);
+    if (keys.backward) controls.moveForward(-speed);
+    if (keys.left) controls.moveRight(-speed);
+    if (keys.right) controls.moveRight(speed);
+
+    for (let wall of walls) {
+      if (Math.abs(camera.position.x - wall.position.x) < 0.7 &&
+          Math.abs(camera.position.z - wall.position.z) < 0.7) {
+        camera.position.copy(prevPos);
+        break;
+      }
+    }
+
+    // 【追加】マウス操作時も上下に動かないよう固定
+    camera.rotation.x = 0;
+    camera.rotation.z = 0;
+
+    for (let i = coins.length - 1; i >= 0; i--) {
+      if (camera.position.distanceTo(coins[i].position) < 0.8) {
+        scene.remove(coins[i]);
+        coins.splice(i, 1);
+        score += 10;
+        scoreElement.innerText = "Score: " + score;
+      }
+    }
+  }
+
+  function updateEnemies() {
+    if (isGameOver || !gameStarted) return;
+    const enemySpeed = 0.05; 
+    const collisionDist = 0.7; 
+    const hitDist = 0.8;
+
+    enemies.forEach(enemy => {
+      const prevPos = enemy.position.clone();
+      const dir = new THREE.Vector3();
+      dir.subVectors(camera.position, enemy.position).normalize();
+      dir.y = 0; 
+
+      enemy.position.x += dir.x * enemySpeed;
+      for (let wall of walls) {
+        if (Math.abs(enemy.position.x - wall.position.x) < collisionDist &&
+            Math.abs(enemy.position.z - wall.position.z) < collisionDist) {
+          enemy.position.x = prevPos.x;
+          break;
+        }
+      }
+
+      enemy.position.z += dir.z * enemySpeed;
+      for (let wall of walls) {
+        if (Math.abs(enemy.position.x - wall.position.x) < collisionDist &&
+            Math.abs(enemy.position.z - wall.position.z) < collisionDist) {
+          enemy.position.z = prevPos.z;
+          break;
+        }
+      }
+
+      const dx = camera.position.x - enemy.position.x;
+      const dz = camera.position.z - enemy.position.z;
+      const distanceXZ = Math.sqrt(dx * dx + dz * dz);
+      if (distanceXZ < hitDist) {
+        isGameOver = true;
+        controls.unlock();
+        gameOverScreen.style.display = "block";
+      }
+    });
+  }
+
+  const minimapCtx = minimapCanvas.getContext("2d");
+  function drawMinimap() {
+    if (titleScreen.style.display === "flex") return;
+    minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+    minimapCtx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    minimapCtx.fillRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+
+    const scale = minimapCanvas.width / MAP_SIZE;
+    const offset = HALF_MAP;
+
+    minimapCtx.fillStyle = "#0066ff";
+    walls.forEach(w => minimapCtx.fillRect((w.position.x + offset) * scale, (w.position.z + offset) * scale, 2, 2));
+    minimapCtx.fillStyle = "gold";
+    coins.forEach(c => minimapCtx.fillRect((c.position.x + offset) * scale, (c.position.z + offset) * scale, 3, 3));
+    minimapCtx.fillStyle = "red";
+    enemies.forEach(e => minimapCtx.fillRect((e.position.x + offset) * scale - 2, (e.position.z + offset) * scale - 2, 4, 4));
+    minimapCtx.fillStyle = "white";
+    minimapCtx.fillRect((camera.position.x + offset) * scale - 2, (camera.position.z + offset) * scale - 2, 4, 4);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    
+    processGamepadInput();
+    updatePlayer();
+    updateEnemies();
+    coins.forEach(c => c.rotation.z += 0.05);
+    drawMinimap();
+    
+    renderer.render(scene, camera);
+  }
+  
+  camera.position.set(0, 1.5, 0);
+  animate();
+
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script>
+</body>
+</html>
